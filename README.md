@@ -18,7 +18,7 @@ When this output is visible the compilation step has been completed successfully
 
 Reproducing the experiments
 -----
-First extract the tarballs in the mcc and the dve directories.
+First extract the tarballs in the mcc directory using `tar Jxf models.tar.xz`.
 
 Use `generate.py` as the preprocessing step to generate LDD and BDD files from the models.
 The file `generate.py` can be configured with a timeout value (in the file itself).
@@ -29,10 +29,19 @@ Use `generate.py <REGEXP>` to generate all files matching the given input.
 You can use this to quickly generate files in parallel on a cluster.
 The `generate-slurm.sh` does this, use `sbatch -N... -p... generate-slurm.sh`.
 
-Use `exp.py` with either parameter `run` or `report` to run the experiments or to generate a report of the results.
-Use `exp.py` without parameters to receive a list of valid inputs for the script.
+The scripts `exp-cluster.py` and `exp48.py` are configured to run on 16-core machines and 48-core machines respectively.
 
-A specialized `exp-cluster.py` runs the experiments for the cluster with 16-core machines, just the 'offline' LDD and BDD experiments. We used `sbatch -N... -p... exp-cluster-slurm.sh` to run this.
+For a simple small example, you can generate some LDD files with `generate.py` and then use `exp-simple.py run` to run "simple" experiments.
+
+With `exp-simple.py cache` you can populate a cache file but this is optional.
+With `exp-simple.py report` you get a report of the status of all experiments.
+With `exp-simple.py csv` you get a CSV file of the results.
+
+The log files of the 16-core machine cluster are in logs-cluster.tar.gz and the log files of the 48-core machine experiments are in logs-48.tar.gz.
+The generated CSV files are in results.csv (for the 16-core cluster) and results48.csv
+
+To analyse these results we used R and have provided two R scripts `analyse.r` and `analyse48.r`. (Unfortunately these are not part of the artifact, R wants internet to install packages.)
+The R scripts generate the tables and numbers that we used in the empirical evaluation.
 
 Running a Promela example
 -----
