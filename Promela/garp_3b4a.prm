@@ -1,0 +1,709 @@
+/*
+ * The model of Generic Attribute Registration Protocol
+ * as specified in IEEE Std 802.1D 2004.
+ *
+ * This file must be preprocessed by python-mako template engine.
+ * 
+ * Revision:   26
+ * Latest fix: FIX9 (extracted GIP process from GID)
+ * Date:       Sep 2010
+ * 
+ * Igor Konnov, 2009-2010
+ *
+ * General abstractions:
+ *  - The only application, the only attribute and the only attribute value
+ *    are considered.
+ *  - Participants exchange data by asynchronous channels of size 1
+ *    (the spec does not say specifically about GIP communication mechanism).
+ *  - Participants are connected in a tree.
+ *  - Participants do not fail. However, packets may be lost.
+ *  - IMPORTANT: all applications (and their attached GIDs) are located
+ *    in different LANs!
+ */#define __instances_GID_ARLA 8#define __instances_GID_A 4
+
+
+mtype = { Empty, JoinEmpty, JoinIn, LeaveIn, LeaveEmpty, LeaveAll,
+          ReqJoin, ReqLeave };
+
+/* registrar states */
+#define MT 0
+#define LV 1
+#define IN 2
+
+/* applicant states */
+#define VA 0
+#define AA 1
+#define QA 2
+#define LA 3
+#define VP 4
+#define AP 5
+#define QP 6
+#define VO 7
+#define AO 8
+#define QO 9
+#define LO 10
+
+
+
+
+
+
+
+
+/* global definitions (ease specifications) */
+chan port[12] = [1] of { mtype };
+chan gip_ring[8] = [1] of { mtype, int };
+
+byte rs[12]; /* registrar states */
+
+
+    /**
+     * Node of bridge consisting of GARP Information Declaration entities.
+     * According to p. 80 of spec it contains Application and Registrar.
+     * Also it contains LeaveAll component according to p. 88 of spec.
+     *
+     * TODO: check the idea of Alexander Godlevsky, i.e. rely on timer
+     * constraints: LeaveTime = 3 * JoinTime, 50 <= LeaveAllTime <= 75 * JoinTime
+     */
+    proctype GID_ARLA(byte id, port_in_id, port_out_id, gip_id, gip_next_id) {
+        byte as;
+        bool join_timer;
+        bool leave_timer;
+    
+
+        bool got_req_join = false;
+
+        /* temporary variables to receive messages into */
+        mtype m;
+        int m_gid;
+
+        /* initialize states */
+        d_step {
+            as = VO;
+            join_timer = false; 
+            rs[id] = MT;
+            leave_timer = false;
+            m = Empty;
+            m_gid = 0;
+        }
+
+        /* main loop */
+main_loop:        
+        do
+            /* built-in application indicates ReqJoin */
+            :: (as == LA || as >= VO && as <= LO) 
+                    && !got_req_join -> got_req_join = true;
+                /* applicant: ReqJoin */
+progress_GID_ARLA_application_join:
+                
+                printf("MSC: ReqJoin!\n");
+
+                d_step {
+                    if
+                        :: as == LA -> as = VA;
+                        :: as == VO -> as = VP;
+                        :: as == AO -> as = AP;
+                        :: as == QO -> as = QP;
+                        :: as == LO -> as = VP;
+                        :: else -> assert(false); /* -x- */
+                    fi;
+                }
+
+            :: gip_ring[gip_id]?ReqJoin, m_gid ->
+
+            if
+                :: m_gid != gip_id ->
+                    /* pass it to the next participant in the ring */
+                    gip_ring[gip_next_id]!ReqJoin, m_gid;
+
+                    if
+                        :: (as == LA || as >= VO && as <= LO) ->
+                             /* IndJoin is indicated by GIP */
+                             /* GIP: IndJoin */
+        progress_GID_ARLA_join:
+                             d_step {
+                                 if
+                                     :: as == LA -> as = VA;
+                                     :: as == VO -> as = VP;
+                                     :: as == AO -> as = AP;
+                                     :: as == QO -> as = QP;
+                                     :: as == LO -> as = VP;
+                                     :: else -> assert(false); /* -x- */
+                                 fi;
+                            };
+
+                        :: else;
+                    fi;
+
+                :: else;                    
+            fi;                    
+
+            :: (as >= VA && as <= QA || as >= VP && as <= QP)
+            && got_req_join -> got_req_join = false;
+                /* applicant: ReqLeave */
+progress_GID_ARLA_application_leave:                
+
+                d_step {
+                    printf("MSC: ReqLeave!\n");
+
+                    if
+                        :: as >= VA && as <= QA -> as = LA;
+                        :: as == VP -> as = VO;
+                        :: as == AP -> as = AO;
+                        :: as == QP -> as = QO;
+                        :: else -> assert(false);
+                    fi;
+                }
+                
+            :: gip_ring[gip_id]?ReqLeave, m_gid ->
+
+                if
+                    :: m_gid != gip_id -> gip_ring[gip_next_id]!ReqLeave, m_gid;
+    
+                    if
+                        :: (as >= VA && as <= QA || as >= VP && as <= QP) ->
+                        /* IndLeave is issued by another GID in a bridge */
+                        /* GIP: IndLeave */
+    progress_GID_ARLA_leave:
+                        got_req_join = false;
+
+                        d_step {
+                            if
+                                :: as >= VA && as <= QA -> as = LA;
+                                :: as == VP -> as = VO;
+                                :: as == AP -> as = AO;
+                                :: as == QP -> as = QO;
+                                :: else -> assert(false);
+                            fi;
+                        }
+
+                        ::else; /* skip it */
+                    fi;
+                    
+                    :: else;
+                fi;                    
+
+            :: (port[port_in_id]?[JoinIn] || port[port_in_id]?[JoinEmpty]) ->
+                /* registrar: rJoinIn, rJoinEmpty */
+
+                // receive JoinIn or JoinEmpty
+                port[port_in_id]?m;
+
+                d_step {
+
+                /* applicant: rJoinIn, rJoinEmpty */
+
+                    if
+                        :: m == JoinIn ->
+                            if 
+                                :: as == VA -> as = AA;
+                                :: as == AA -> as = QA;
+                                :: as == QA -> as = QA;
+                                :: as == LA -> as = LA;
+                                :: as == VP -> as = AP;
+                                :: as == AP -> as = QP;
+                                :: as == QP -> as = QP;
+                                :: as == VO -> as = AO;
+                                :: as == AO -> as = QO;
+                                :: as == QO -> as = QO;
+                                :: as == LO -> as = AO;
+                            fi;
+
+                        :: m == JoinEmpty ->
+                            if 
+                                :: as == VA -> as = VA;
+                                :: as == AA -> as = VA;
+                                :: as == QA -> as = VA;
+                                :: as == LA -> as = VO;
+                                :: as == VP -> as = AP;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = VO;
+                                :: as == AO -> as = VO;
+                                :: as == QO -> as = VO;
+                                :: as == LO -> as = VO;
+                            fi;
+                    fi;
+                }
+
+                /* registrar: continuing... */
+                if
+                    :: rs[id] == IN /* IN */;
+                    :: rs[id] == LV ->
+                        d_step {
+                            leave_timer = false;   /* Stop leave_timer */
+                            rs[id] = IN;       /* IN */
+                        }
+                        printf("MSC: IndJoin");
+                        gip_ring[gip_next_id]!ReqJoin, gip_id;  /* ReqJoin */
+
+        /* FIX8: application joins on IndJoin */
+                    :: rs[id] == MT ->
+                        rs[id] = IN;          /* IN */
+                        printf("MSC: IndJoin");
+                        gip_ring[gip_next_id]!ReqJoin, gip_id;  /* ReqJoin */
+        /* FIX8: application joins on IndJoin */
+               fi;
+
+            :: port[port_in_id]?Empty ->
+                d_step {
+                /* registrar: rEmpty */
+                // registrar state is not changed
+
+                /* applicant: rEmpty */
+                    if
+                        :: as == VA || as == AA || as == QA ->
+                            as = VA;
+                        :: as == LA; // state is preserved
+                        :: as == VP || as == AP || as == QP ->
+                            as = VP;
+                        :: as == VO || as == AO || as == QO || as == LO ->
+                            as = VO;
+                    fi;
+                }
+
+            :: (port[port_in_id]?[LeaveIn] || port[port_in_id]?[LeaveEmpty]) ->
+                port[port_in_id]?m;
+
+                d_step {
+
+                /* registrar: rLeaveIn, rLeaveEmpty */
+                    if
+                        :: rs[id] == IN ->
+                            leave_timer = true; /* start leave_timer */
+                            rs[id] = LV;     /* LV */
+                        :: else              /* do nothing */
+                    fi;
+
+                /* applicant: rLeaveIn, rLeaveEmpty */
+                    if
+                        :: m == LeaveIn ->
+                            if
+                                :: as == AA -> as = VA;
+                                :: as == QA -> as = VP;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = LO;
+                                :: as == AO -> as = LO;
+                                :: as == QO -> as = LO;
+                                :: as == LO -> as = LO;
+                                :: else;
+                            fi;
+
+                        :: m == LeaveEmpty ->
+                            if
+                                :: as == VA -> as = VP;
+                                :: as == AA -> as = VP;
+                                :: as == QA -> as = VP;
+                                :: as == LA -> as = VO;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = LO;
+                                :: as == AO -> as = LO;
+                                :: as == QO -> as = LO;
+                                :: as == LO -> as = VO;
+                                :: else;
+                            fi;
+                    fi;
+                } /* end of d_step */
+
+            :: leave_timer && rs[id] == LV ->
+                /* registrar: leave_timer! */
+                d_step {
+                    printf("MSC: leavetimer!\n");
+                    leave_timer = false; /* FIX6: Stop leave_timer (it is expired!) */
+                    rs[id] = MT;
+                }
+                gip_ring[gip_next_id]!ReqLeave, gip_id; /* ReqLeave */
+
+            ::  /* leavealltimer! */ nfull(port[port_out_id]) ->
+progress_GID_ARLA_leavealltimer:
+
+                d_step {
+                    printf("MSC: leavealltimer!\n");
+
+                    /* sLeaveAll event */
+                    /* registrar: LeaveAll */
+                    if
+                        :: rs[id] == IN ->
+                                leave_timer = true; /* start leave_timer */
+                                rs[id] = LV;     /* LV */
+                        :: else                  /* do nothing */
+                    fi;
+                
+                /* applicant: LeaveAll */
+                    if
+                        :: as == VA -> as = VP;
+                        :: as == AA -> as = VP;
+                        :: as == QA -> as = VP;
+                        :: as == LA -> as = VO;
+                        :: as == VP -> as = VP;
+                        :: as == AP -> as = VP;
+                        :: as == QP -> as = VP;
+                        :: as == VO -> as = LO;
+                        :: as == AO -> as = LO;
+                        :: as == QO -> as = LO;
+                        :: as == LO -> as = VO;
+                    fi;
+                } /* end of d_step */
+
+                /* FIX4: finally send LeaveAll to port */
+                /*
+                   We don't have to send LeaveAll by GIP as all the bridge
+                   participants are agreed to Leave.
+                 */
+                port[port_out_id]!LeaveAll;
+
+
+            /* FIX4: reaction on LeaveAll */
+
+            :: port[port_in_id]?[LeaveAll] ->
+                /* rLeaveAll */
+                port[port_in_id]?LeaveAll;
+
+                d_step {
+
+                /* registrar: LeaveAll */
+                    if
+                        :: rs[id] == IN ->
+                                leave_timer = true; /* start leave_timer */
+                                rs[id] = LV;     /* LV */
+
+                        :: else                  /* do nothing */
+                    fi;
+                
+                /* applicant: LeaveAll */
+                    if
+                        :: as == VA -> as = VP;
+                        :: as == AA -> as = VP;
+                        :: as == QA -> as = VP;
+                        :: as == LA -> as = VO;
+                        :: as == VP -> as = VP;
+                        :: as == AP -> as = VP;
+                        :: as == QP -> as = VP;
+                        :: as == VO -> as = LO;
+                        :: as == AO -> as = LO;
+                        :: as == QO -> as = LO;
+                        :: as == LO -> as = VO;
+                    fi;
+                } /* end of d_step */
+
+
+            :: join_timer
+                    && (as == VA || as == AA || as == VP || as == AP)
+                    && /* FIX2 */ nfull(port[port_out_id]) ->
+                /* applicant: transmitPDU! */
+                printf("MSC: transmitPDU!\n");
+                if
+                    :: rs[id] == IN ->
+                        port[port_out_id]!JoinIn;
+
+                    :: else -> port[port_out_id]!JoinEmpty;
+                fi;
+
+                d_step {
+                    if
+                        :: as == VA -> as = AA;
+                        :: as == AA -> as = QA;
+                        :: as == VP -> as = AA;
+                        :: as == AP -> as = QA;
+                    fi;
+                }
+
+            :: join_timer 
+                    && as == LA
+                    && /* FIX2 */ nfull(port[port_out_id]) ->
+                printf("MSC: transmitPDU!\n");
+                /* AMBIGUITY #2 */
+                /* according to combined applicant/registrar table */
+                /*
+                if
+                    :: rs[id] == IN -> rs[id] = LV;
+                    :: else;
+                fi;
+                */
+
+                /* applicant: transmitPDU! */
+                as = VO;
+                port[port_out_id]!LeaveEmpty;
+
+
+            :: join_timer
+                    && as == LO && /* FIX2 */ nfull(port[port_out_id]) ->
+                /* applicant: transmitPDU! */
+                d_step {
+                    printf("MSC: transmitPDU!\n");
+                    as = VO;
+                }
+                port[port_out_id]!Empty; /* FIX3 */
+
+
+            /*
+             * This behaviour is not specified anywhere.
+             * However, it is like join_timer works in Linux implementation.
+             * (no attribute, no timer).
+             */
+            :: got_req_join && !join_timer -> join_timer = true;
+        od;
+    }
+
+
+    /**
+     * Node of bridge consisting of GARP Information Declaration entities.
+     * According to p. 80 of spec it contains Application and Registrar.
+     * Also it contains LeaveAll component according to p. 88 of spec.
+     *
+     * TODO: check the idea of Alexander Godlevsky, i.e. rely on timer
+     * constraints: LeaveTime = 3 * JoinTime, 50 <= LeaveAllTime <= 75 * JoinTime
+     */
+    proctype GID_A(byte id, port_in_id, port_out_id) {
+        byte as;
+        bool join_timer;
+    
+
+        bool got_req_join = false;
+
+        /* temporary variables to receive messages into */
+        mtype m;
+
+        /* initialize states */
+        d_step {
+            as = VO;
+            join_timer = false; 
+            m = Empty;
+        }
+
+        /* main loop */
+main_loop:        
+        do
+            /* built-in application indicates ReqJoin */
+            :: (as == LA || as >= VO && as <= LO) 
+                    && !got_req_join -> got_req_join = true;
+                /* applicant: ReqJoin */
+progress_GID_A_application_join:
+                
+                printf("MSC: ReqJoin!\n");
+
+                d_step {
+                    if
+                        :: as == LA -> as = VA;
+                        :: as == VO -> as = VP;
+                        :: as == AO -> as = AP;
+                        :: as == QO -> as = QP;
+                        :: as == LO -> as = VP;
+                        :: else -> assert(false); /* -x- */
+                    fi;
+                }
+
+
+            :: (as >= VA && as <= QA || as >= VP && as <= QP)
+            && got_req_join -> got_req_join = false;
+                /* applicant: ReqLeave */
+progress_GID_A_application_leave:                
+
+                d_step {
+                    printf("MSC: ReqLeave!\n");
+
+                    if
+                        :: as >= VA && as <= QA -> as = LA;
+                        :: as == VP -> as = VO;
+                        :: as == AP -> as = AO;
+                        :: as == QP -> as = QO;
+                        :: else -> assert(false);
+                    fi;
+                }
+                
+
+            :: (port[port_in_id]?[JoinIn] || port[port_in_id]?[JoinEmpty]) ->
+                /* registrar: rJoinIn, rJoinEmpty */
+
+                // receive JoinIn or JoinEmpty
+                port[port_in_id]?m;
+
+                d_step {
+
+                /* applicant: rJoinIn, rJoinEmpty */
+
+                    if
+                        :: m == JoinIn ->
+                            if 
+                                :: as == VA -> as = AA;
+                                :: as == AA -> as = QA;
+                                :: as == QA -> as = QA;
+                                :: as == LA -> as = LA;
+                                :: as == VP -> as = AP;
+                                :: as == AP -> as = QP;
+                                :: as == QP -> as = QP;
+                                :: as == VO -> as = AO;
+                                :: as == AO -> as = QO;
+                                :: as == QO -> as = QO;
+                                :: as == LO -> as = AO;
+                            fi;
+
+                        :: m == JoinEmpty ->
+                            if 
+                                :: as == VA -> as = VA;
+                                :: as == AA -> as = VA;
+                                :: as == QA -> as = VA;
+                                :: as == LA -> as = VO;
+                                :: as == VP -> as = AP;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = VO;
+                                :: as == AO -> as = VO;
+                                :: as == QO -> as = VO;
+                                :: as == LO -> as = VO;
+                            fi;
+                    fi;
+                }
+
+
+            :: port[port_in_id]?Empty ->
+                d_step {
+                /* registrar: rEmpty */
+                // registrar state is not changed
+
+                /* applicant: rEmpty */
+                    if
+                        :: as == VA || as == AA || as == QA ->
+                            as = VA;
+                        :: as == LA; // state is preserved
+                        :: as == VP || as == AP || as == QP ->
+                            as = VP;
+                        :: as == VO || as == AO || as == QO || as == LO ->
+                            as = VO;
+                    fi;
+                }
+
+            :: (port[port_in_id]?[LeaveIn] || port[port_in_id]?[LeaveEmpty]) ->
+                port[port_in_id]?m;
+
+                d_step {
+
+
+                /* applicant: rLeaveIn, rLeaveEmpty */
+                    if
+                        :: m == LeaveIn ->
+                            if
+                                :: as == AA -> as = VA;
+                                :: as == QA -> as = VP;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = LO;
+                                :: as == AO -> as = LO;
+                                :: as == QO -> as = LO;
+                                :: as == LO -> as = LO;
+                                :: else;
+                            fi;
+
+                        :: m == LeaveEmpty ->
+                            if
+                                :: as == VA -> as = VP;
+                                :: as == AA -> as = VP;
+                                :: as == QA -> as = VP;
+                                :: as == LA -> as = VO;
+                                :: as == AP -> as = VP;
+                                :: as == QP -> as = VP;
+                                :: as == VO -> as = LO;
+                                :: as == AO -> as = LO;
+                                :: as == QO -> as = LO;
+                                :: as == LO -> as = VO;
+                                :: else;
+                            fi;
+                    fi;
+                } /* end of d_step */
+
+
+
+
+            /* FIX4: reaction on LeaveAll */
+
+            :: port[port_in_id]?[LeaveAll] ->
+                /* rLeaveAll */
+                port[port_in_id]?LeaveAll;
+
+                d_step {
+
+                
+                /* applicant: LeaveAll */
+                    if
+                        :: as == VA -> as = VP;
+                        :: as == AA -> as = VP;
+                        :: as == QA -> as = VP;
+                        :: as == LA -> as = VO;
+                        :: as == VP -> as = VP;
+                        :: as == AP -> as = VP;
+                        :: as == QP -> as = VP;
+                        :: as == VO -> as = LO;
+                        :: as == AO -> as = LO;
+                        :: as == QO -> as = LO;
+                        :: as == LO -> as = VO;
+                    fi;
+                } /* end of d_step */
+
+
+            :: join_timer
+                    && (as == VA || as == AA || as == VP || as == AP)
+                    && /* FIX2 */ nfull(port[port_out_id]) ->
+                /* applicant: transmitPDU! */
+                printf("MSC: transmitPDU!\n");
+                port[port_out_id]!JoinIn; /* no registrar component */
+
+
+                d_step {
+                    if
+                        :: as == VA -> as = AA;
+                        :: as == AA -> as = QA;
+                        :: as == VP -> as = AA;
+                        :: as == AP -> as = QA;
+                    fi;
+                }
+
+            :: join_timer 
+                    && as == LA
+                    && /* FIX2 */ nfull(port[port_out_id]) ->
+                printf("MSC: transmitPDU!\n");
+
+                /* applicant: transmitPDU! */
+                as = VO;
+                port[port_out_id]!LeaveEmpty;
+
+
+            :: join_timer
+                    && as == LO && /* FIX2 */ nfull(port[port_out_id]) ->
+                /* applicant: transmitPDU! */
+                d_step {
+                    printf("MSC: transmitPDU!\n");
+                    as = VO;
+                }
+                port[port_out_id]!Empty; /* FIX3 */
+
+
+            /*
+             * This behaviour is not specified anywhere.
+             * However, it is like join_timer works in Linux implementation.
+             * (no attribute, no timer).
+             */
+            :: got_req_join && !join_timer -> join_timer = true;
+        od;
+    }
+
+
+init {
+    run GID_ARLA(0, 0, 1, 0, 1); // GID_ARLA1 pid: 1
+    run GID_ARLA(1, 2, 3, 1, 2); // GID_ARLA2 pid: 2
+    run GID_ARLA(2, 4, 5, 2, 0); // GID_ARLA2 pid: 3
+
+    run GID_ARLA(3, 5, 4, 3, 4); // GID_ARLA2 pid: 4
+    run GID_ARLA(4, 7, 6, 4, 3); // GID_ARLA2 pid: 5
+
+    run GID_ARLA(5, 6, 7, 5, 6); // GID_ARLA1 pid: 6
+    run GID_ARLA(6, 8, 9, 6, 7); // GID_ARLA2 pid: 7
+    run GID_ARLA(7, 10, 11, 7, 5); // GID_ARLA2 pid: 8
+
+    run GID_A(8, 1, 0); // GID_A1 pid: 9
+    run GID_A(9, 3, 2); // GID_A2 pid: 10
+    run GID_A(10, 9, 8); // GID_A2 pid: 11
+    run GID_A(11, 11, 10); // GID_A2 pid: 12
+}
+

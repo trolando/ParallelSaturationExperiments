@@ -1,0 +1,16 @@
+*.ldd
+*.bdd
+*.mdd
+*.cpp
+*.dve2C
+*.timeout-*
+tools/dve2lts-sym
+tools/pnml2lts-sym
+tools/lddmc
+tools/mc
+tools/divine
+tools/ldd2bdd
+tools/ldd2meddly
+tools/medmc
+job*
+slurm-*out
