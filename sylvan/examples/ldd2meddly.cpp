@@ -383,6 +383,7 @@ ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
 
         result = F->createReducedNode(-1, nb);
     } else if (vmeta == 3) {
+        assert(0);
         /* only-read level */
         assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
 
@@ -409,9 +410,29 @@ ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
 
         result = F->createReducedNode(-1, nb);
     } else if (vmeta == 4) {
-        printf("No support for only-read or only-write!\n");
-        exit(0);
-    } else if (vmeta == 2 || vmeta == 4) {
+        /* write or only-write level */
+        assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
+
+        // Determine length of LDD list
+        int len = 0;
+        MDD x = dd;
+        while (x != lddmc_false) {
+            len++;
+            x = lddmc_getright(x);
+        }
+
+        unpacked_node* nb = unpacked_node::newSparse(F, -level, len);
+        x = dd;
+        for (int i=0; i<len; i++) {
+            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, level-1);
+            // printf("REC %zu.%d => %d\n", inp, lddmc_getvalue(x), m_d);
+            nb->i_ref(i) = lddmc_getvalue(x);
+            nb->d_ref(i) = /*F->linkNode(m_d); */ level > 1 ? F->linkNode(m_d) : m_d;
+            x = lddmc_getright(x);
+        }
+
+        result = F->createReducedNode(-1, nb);
+    } else if (vmeta == 2) {
         /* write or only-write level */
         assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
 
@@ -435,8 +456,6 @@ ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
         }
 
         result = F->createReducedNode(-1, nb);
-    } else if (vmeta == 3) {
-        assert(0); // no support for now
     } else if (vmeta == 5) {
         /* skip meta */
         result = ldd_rel_to_meddly(dd, mddnode_getdown(nmeta), F, level);
@@ -565,7 +584,7 @@ void run()
     LACE_ME;
 
     // Init Sylvan
-    sylvan_set_limits(1LL<<30, 1, 10);
+    sylvan_set_limits(2LL<<30, 1, 10);
     sylvan_init_package();
     sylvan_init_ldd();
     sylvan_init_mtbdd();
@@ -666,7 +685,7 @@ void run()
     }
     */
 
-    if (verbose) printf("Removing action labels...\n");
+    printf("Removing action labels...\n");
 
     // get rid of the actions
     for (int i=0; i<next_count; i++) {
@@ -677,7 +696,7 @@ void run()
     }
 
     // Report that we prepare BDD conversion
-    if (verbose) printf("Preparing conversion to Meddly MXD...\n");
+    printf("Converting to Meddly MDD...\n");
 
     // Compute highest value at each level (from reachable states)
     uint32_t highest[vector_size];
@@ -811,6 +830,7 @@ void run()
             ptr++;
         }
 
+        /*
         print_matrix(vector_size, next[i]->meta);
         int level_count = 0;
         for (int j=0; j<vector_size+1; j++) {
@@ -819,6 +839,7 @@ void run()
                 level_count++;
             }
         }
+        */
 
 #ifndef NDEBUG
         long ldd_levels = lddmc_test_ismdd(next[i]->dd)-1;
@@ -830,7 +851,7 @@ void run()
         // double card = m_next[i].getCardinality();
         // card /= (1L<<(2*(vector_size-level_count)));
         // printf(", %u %.0lf\n", m_next[i].getNodeCount(), card);
-        printf("\n");
+        // printf("\n");
     }
 
     // Report Sylvan statistics (if SYLVAN_STATS is set)
@@ -856,7 +877,8 @@ void run()
             expert_forest::HOLE_MANAGER_DETAILED);
 */
 
-    /*
+    printf("Testing correctness by running event-saturation on the result...\n");
+
     satpregen_opname::pregen_relation* ensf = 
         new satpregen_opname::pregen_relation(mdd, mxd, mdd, next_count);
     for (int i=0; i<next_count; i++) ensf->addToRelation(m_next[i]);
@@ -885,6 +907,7 @@ void run()
 
     assert(m_reachable == m_states);
 
+    /*
     if (verbose) {
         mdd->reportStats(meddlyout, "\t",
             expert_forest::HUMAN_READABLE_MEMORY |
