@@ -19,6 +19,13 @@ When this output is visible the compilation step has been completed successfully
 Reproducing the experiments
 -----
 First extract the tarballs in the mcc directory using `tar Jxf models.tar.xz`.
+For a very simple example, run `./generate.py HouseConstruction-PT-010` twice,
+the first time generates the LDD files from the PNML input files, the second time
+generates the BDD and MDD files from the LDD input files.
+Then run `./exp-simple.py run` to run experiments on the LDD, BDD, MDD files that are there,
+on 1, 2, 4 cores. This corresponds to the `mdd-sat`, `ldd-sat`, `ldd-chaining`, `ldd-bfs` and `bdd-sat`
+methods in the paper.
+Use `./exp-simple.py csv` to get the results in a CSV format.
 
 Use `generate.py` as the preprocessing step to generate LDD and BDD files from the models.
 The file `generate.py` can be configured with a timeout value (in the file itself).
@@ -28,6 +35,9 @@ Use `generate.py todo` to get the list of files not yet generated and did not ti
 Use `generate.py <REGEXP>` to generate all files matching the given input.
 You can use this to quickly generate files in parallel on a cluster.
 The `generate-slurm.sh` does this, use `sbatch -N... -p... generate-slurm.sh`.
+Each time you run `generate.py` without parameters, it will start with a random file to generate.
+If you just want to quickly generate some files, just repeatedly run `generate.py` and interrupt
+with CTRL-C if it takes too long.
 
 The scripts `exp-cluster.py` and `exp48.py` are configured to run on 16-core machines and 48-core machines respectively.
 
