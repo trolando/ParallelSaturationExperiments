@@ -8,6 +8,9 @@ pushd packages
 echo a | sudo -S dpkg -i *.deb
 popd
 
+# install R packages
+tar xf R.tgz -C"$HOME"
+
 # compile Meddly
 pushd meddly
 ./autogen.sh
@@ -44,6 +47,10 @@ cp /usr/local/bin/* tools
 echo a | sudo -S bash -c 'echo 1 > /proc/sys/vm/overcommit_memory'
 # Now make this setting permanent in this VM.
 echo a | sudo -S bash -c 'echo "vm.overcommit_memory = 1" > /etc/sysctl.d/99-sylvan.conf'
+
+# run R scripts
+./analyse.r
+./analyse48.r
 
 # run the running example from the paper with multi-core saturation and Force order
 # among other lines this commandline should output "pnml2lts-sym: state space has 5 states, 12 nodes"

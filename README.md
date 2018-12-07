@@ -8,7 +8,7 @@ Information on the experiments are found in the submitted paper.
 
 Compiling the sources
 -----
-Installing the Debian packages and compiling the necessary sources is done by running `./compile_sources.sh`.
+Installing the Debian packages, R packages and compiling the necessary sources is done by running `./compile_sources.sh`.
 The script will compile and install *Meddly*, *Sylvan* and *LTSmin*.
 Running the compile script ensures that all binaries that are built end up in the `tools` directory.
 Ultimately the script will run multi-core saturation with the force order on the Petri net running example presented in the paper.
@@ -50,7 +50,8 @@ With `exp-simple.py csv` you get a CSV file of the results.
 The log files of the 16-core machine cluster are in logs-cluster.tar.gz and the log files of the 48-core machine experiments are in logs-48.tar.gz.
 The generated CSV files are in results.csv (for the 16-core cluster) and results48.csv
 
-To analyse these results we used R and have provided two R scripts `analyse.r` and `analyse48.r`. (Unfortunately these are not part of the artifact, R wants internet to install packages.)
+To analyse these results we used R and have provided two R scripts `analyse.r` and `analyse48.r`.
+The compile script `compile_sources.sh` takes care of installing R and the dependencies for running both R scripts.
 The R scripts generate the tables and numbers that we used in the empirical evaluation.
 
 Running a Promela example
