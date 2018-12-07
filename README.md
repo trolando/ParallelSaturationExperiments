@@ -16,16 +16,26 @@ I.e. the commandline that is automatically run is `tools/pnml2lts-sym --saturati
 This means the last few lines that are shown when running `./compile_sources.sh` contain `pnml2lts-sym: state space has 5 states, 12 nodes`.
 When this output is visible the compilation step has been completed successfully.
 
-Reproducing the experiments
+Reproducing the experiments (simple version)
 -----
-First extract the tarballs in the mcc directory using `tar Jxf models.tar.xz`.
-For a very simple example, run `./generate.py HouseConstruction-PT-010` twice,
-the first time generates the LDD files from the PNML input files, the second time
+The following steps use the *simple* versions of the benchmark scripts for maximal 4 workers.
+- First extract the models in the `mcc` directory using `tar Jxf models.tar.xz`.
+- For a very simple example, run `./generate.py HouseConstruction-PT-010` twice.
+The first time generates the LDD files from the PNML input files, the second time
 generates the BDD and MDD files from the LDD input files.
-Then run `./exp-simple.py run` to run experiments on the LDD, BDD, MDD files that are there,
+- You can repeatedly run `./generate.py .*ldd`, `./generate.py .*bdd` and `./generate.py .*mdd` to generate
+more input files, if generating a file takes too long, just interrupt and restart, as the order in which
+the script tries to generate input files is randomized.
+- Run `./exp-simple.py run` to run experiments on the LDD, BDD, MDD files in the `mcc` directory,
 on 1, 2, 4 cores. This corresponds to the `mdd-sat`, `ldd-sat`, `ldd-chaining`, `ldd-bfs` and `bdd-sat`
 methods in the paper.
-Use `./exp-simple.py csv` to get the results in a CSV format.
+The default timeout is 60 seconds so this should not take too long. You can change this in `exp-simple.py`
+if you want a different timeout.
+- Use `./exp-simple.py csv > results-simple.csv` to get the results in a CSV format.
+- Use `./analyse-simple.r` to produce the tables and Figures for the paper (Figures in the 'tex' files).
+
+Reproducing the experiments (16-core and 48-core versions)
+-----
 
 Use `generate.py` as the preprocessing step to generate LDD and BDD files from the models.
 The file `generate.py` can be configured with a timeout value (in the file itself).
