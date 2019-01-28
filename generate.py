@@ -5,6 +5,7 @@ import random
 import re
 from subprocess import Popen, TimeoutExpired
 import sys
+import tarfile
 
 
 DIVINE = os.path.abspath("tools/divine")
@@ -13,6 +14,141 @@ DVE2LTSSYM = os.path.abspath("tools/dve2lts-sym")
 LDD2BDD = os.path.abspath("tools/ldd2bdd")
 LDD2MEDDLY = os.path.abspath("tools/ldd2meddly")
 TIMEOUT = 3600
+
+
+patterns = [
+    (r'ARMCacheCoherence', 'none'),
+    (r'AirplaneLD-pt-(\d+)', r'\3'),
+    (r'angiogenesis-(\d+)', r'\3'),
+    (r'afcs_(\d+)_(\w)', r'\3\4'),
+    (r'BridgeAndVehicles-(V..)-(P..)-(N..)-unfolded', r'\3\4\5'),
+    (r'cs_repetitions-(.)-unfolded', r'0\3'),
+    (r'cs_repetitions-(..)-unfolded', r'\3'),
+    (r'circadian_clock-(\d+)', r'\3'),
+    (r'CircularTrain-(...)', r'\3'),
+    (r'deploy_(.)_(.)', r'\3\4'),
+    (r'des_(..)_(.)', r'\3\4'),
+    (r'dlcsh_(.)_(.)', r'\3\4'),
+    (r'dnawalk-(..)', r'\3'),
+    (r'database(.)UNFOLD', r'0\3'),
+    (r'database(..)UNFOLD', r'\3'),
+    (r'dekker-(..)', r'0\3'),
+    (r'dekker-(...)', r'\3'),
+    (r'2D8_gradient_5x5_(..)', r'D05N0\3'),
+    (r'2D8_gradient_5x5_(...)', r'D05N\3'),
+    (r'2D8_gradient_(..)x.._(..)', r'D\3N0\4'),
+    (r'2D8_gradient_(..)x.._(...)', r'D\3N\4'),
+    (r'distributeur-01-unfolded-(..)', r'\3'),
+    (r'erk-(\d+)', r'\3'),
+    (r'echo-d(.)r(.)', r'd0\3r0\4'),
+    (r'echo-d(.)r(..)', r'd0\3r\4'),
+    (r'EnergyBus', r'none'),
+    (r'eratosthenes-(...)', r'\3'),
+    (r'FMS-(.)', r'00\3'),
+    (r'FMS-(..)', r'0\3'),
+    (r'FMS-(...)', r'\3'),
+    (r'G-PPP-1-1',           r'C0001N0000000001'),
+    (r'G-PPP-1-10',          r'C0001N0000000010'),
+    (r'G-PPP-1-100',         r'C0001N0000000100'),
+    (r'G-PPP-1-1000',        r'C0001N0000001000'),
+    (r'G-PPP-1-10000',       r'C0001N0000010000'),
+    (r'G-PPP-1-100000',      r'C0001N0000100000'),
+    (r'G-PPP-10-10',         r'C0010N0000000010'),
+    (r'G-PPP-10-100',        r'C0010N0000000100'),
+    (r'G-PPP-10-1000000000', r'C0010N1000000000'),
+    (r'G-PPP-100-10',        r'C0100N0000000010'),
+    (r'G-PPP-100-100',       r'C0100N0000000100'),
+    (r'G-PPP-100-1000',      r'C0100N0000001000'),
+    (r'G-PPP-100-10000',     r'C0100N0000010000'),
+    (r'G-PPP-100-100000',    r'C0100N0000100000'),
+    (r'G-PPP-1000-10',       r'C1000N0000000010'),
+    (r'G-PPP-1000-100',      r'C1000N0000000100'),
+    (r'G-PPP-1000-1000',     r'C1000N0000001000'),
+    (r'galloc_res-(.)', r'0\3'),
+    (r'HouseConstruction-(...)', r'\3'),
+    (r'hc(.)k(.)p(.)b(..)', r'C\3K\4P\5B\6'),
+    (r'ht_(d.k.p.b..)', r'\3'),
+    (r'IBM(\w+)', r'none'),
+    (r'IOTP_c(.)m(.)p(.)d(.)', r'C0\3M0\4P0\5D0\6'),
+    (r'IOTP_c(..)m(..)p(..)d(..)', r'C\3M\4P\5D\6'),
+    (r'Kanban-(.)', r'000\3'),
+    (r'Kanban-(..)', r'00\3'),
+    (r'Kanban-(...)', r'0\3'),
+    (r'Kanban-(....)', r'\3'),
+    (r'lamport_fmea-(.)', r'\3'),
+    (r'MAPK-(.)', r'00\3'),
+    (r'MAPK-(..)', r'0\3'),
+    (r'MAPK-(...)', r'\3'),
+    (r'MultiwaySync', r'none'),
+    (r'neoelection-(.).unf', r'\3'),
+    (r'PaceMaker', r'none'),
+    (r'closed_system(.)', r'\3'),
+    (r'open_system_(.)', r'\3'),
+    (r'parking_(.)_(.)', r'\g<3>0\4'),
+    (r'parking_(.)_(..)', r'\3\4'),
+    (r'unf-8x8-4stageSEN-(..)', r'\3'),
+    (r'Peterson-(.)', r'\3'),
+    (r'(.)-10_phaseVariation', r'D0\3CS010'),
+    (r'(..)-10_phaseVariation', r'D\3CS010'),
+    (r'(.)-100_phaseVariation', r'D0\3CS100'),
+    (r'(..)-100_phaseVariation', r'D\3CS100'),
+    (r'Philosophers-(.)', r'00000\3'),
+    (r'Philosophers-(..)', r'0000\3'),
+    (r'Philosophers-(...)', r'000\3'),
+    (r'Philosophers-(....)', r'00\3'),
+    (r'Philosophers-(.....)', r'0\3'),
+    (r'philo_dyn-(.)-unfolded', r'0\3'),
+    (r'philo_dyn-(..)-unfolded', r'\3'),
+    (r'planning', r'none'),
+    (r'PolyORB-LF-(S..)-(J..)-(T..)-unfolded', r'\3\4\5'),
+    (r'PolyORB-NT-(S..)-(J..)-unfolded', r'\3\4'),
+    (r'ProductionCell', r'none'),
+    (r'QCertifProtocol_(..)-unfold', r'\3'),
+    (r'raft_(..)', r'\3'),
+    (r'railroad-(...)-pt', r'\3'),
+    (r'RAS-C-(.)', r'R003C00\3'),
+    (r'RAS-C-(..)', r'R003C0\3'),
+    (r'RAS-C-(...)', r'R003C\3'),
+    (r'RAS-R-(.)', r'R00\3C002'),
+    (r'RAS-R-(..)', r'R0\3C002'),
+    (r'RAS-R-(...)', r'R\3C002'),
+    (r'ring', r'none'),
+    (r'rwmutex-r(..)w(..)', r'r00\3w00\4'),
+    (r'rwmutex-r(...)w(..)', r'r0\3w00\4'),
+    (r'rwmutex-r(....)w(..)', r'r\3w00\4'),
+    (r'rwmutex-r(..)w(...)', r'r00\3w0\4'),
+    (r'rwmutex-r(..)w(....)', r'r00\3w\4'),
+    (r'SafeBus-(..)-unfolded', r'\3'),
+    (r'shared_memory-pt-(.)', r'00000\3'),
+    (r'shared_memory-pt-(..)', r'0000\3'),
+    (r'shared_memory-pt-(...)', r'000\3'),
+    (r'simple_lbs-(.)', r'0\3'),
+    (r'simple_lbs-(..)', r'\3'),
+    (r'SmallOperatingSystem-(MT....DC....)', r'\3'),
+    (r'soli0_square5', r'SqrNC5x5'),
+    (r'soli0_counter_square5', r'SqrCT5x5'),
+    (r'soli1', r'EngNC7x7'),
+    (r'soli1_counter', r'EngCT7x7'),
+    (r'soli2', r'FrnNC7x7'),
+    (r'soli2_counter', r'FrnCT7x7'),
+    (r'sg-(.)-(.)-(.)', r'0\g<3>0\g<4>0\g<5>'),
+    (r'sg-(..)-(.)-(..)', r'\g<3>0\g<4>\g<5>'),
+    (r'SwimmingPool-(.)', r'0\3'),
+    (r'SwimmingPool-(..)', r'\3'),
+    (r'tcp(.)', r'0\3'),
+    (r'tcp(..)', r'\3'),
+    (r'TokenRing-(.)-unfolded', r'00\3'),
+    (r'TokenRing-(..)-unfolded', r'0\3'),
+    (r'trg_(\d+)-(\d+)-(\d+)', r'\3\4\5'),
+    (r'UtahNoC', r'none'),
+    (r'Vasy2003', r'none'),
+]
+
+
+def apply_patterns(n):
+    for p,q in patterns:
+        n = re.sub(r'^(\w+)/(\w+)/{}.pnml$'.format(p), r'\1-\2-{}.pnml'.format(q), n)
+    return n
 
 
 @contextmanager
@@ -111,30 +247,16 @@ def prepare_dve2C(directory, name):
 
 def prepare_rbs_ldd(directory, name):
     inp = "{}.pnml".format(name)
-    outp = "{}.ldd".format(name)
+    outp = "{}-rbs.ldd".format(name)
     return {'inp': inp, 'outp': outp, 'cddir': directory,
-            'the_call': [PNML2LTSSYM, "-rbs", inp, outp, "--saturation=sat", "--vset=lddmc"]}
+            'the_call': [PNML2LTSSYM, "-rbs", inp, outp, "--saturation=sat", "--vset=lddmc", "--lace-workers=4", "--when"]}
 
 
 def prepare_rf_ldd(directory, name):
     inp = "{}.pnml".format(name)
     outp = "{}-rf.ldd".format(name)
     return {'inp': inp, 'outp': outp, 'cddir': directory,
-            'the_call': [PNML2LTSSYM, "-rf", inp, outp, "--saturation=sat", "--vset=lddmc"]}
-
-
-def prepare_rbs_bdd(directory, name):
-    inp = "{}.pnml".format(name)
-    outp = "{}.bdd".format(name)
-    return {'inp': inp, 'outp': outp, 'cddir': directory,
-            'the_call': [PNML2LTSSYM, "-rbs", inp, outp, "--saturation=sat", "--vset=sylvan", "--sylvan-bits=1"]}
-
-
-def prepare_rf_bdd(directory, name):
-    inp = "{}.pnml".format(name)
-    outp = "{}-rf.bdd".format(name)
-    return {'inp': inp, 'outp': outp, 'cddir': directory,
-            'the_call': [PNML2LTSSYM, "-rf", inp, outp, "--saturation=sat", "--vset=sylvan", "--sylvan-bits=1"]}
+            'the_call': [PNML2LTSSYM, "-rf", inp, outp, "--saturation=sat", "--vset=lddmc", "--lace-workers=4", "--when"]}
 
 
 def prepare_ldd2bdd(directory, name):
@@ -189,7 +311,31 @@ if __name__ == "__main__":
     # ./generate.py todo (return all files this script would generate)
     # ./generate.py <regexp> (generate all files matching regular expression)
     if len(sys.argv) > 1:
-        if sys.argv[1] == 'list':
+        if sys.argv[1] == 'download':
+            from bs4 import BeautifulSoup
+            import requests
+            import wget
+
+            BASEURL = "https://mcc.lip6.fr/2016/archives/"
+            soup = BeautifulSoup(requests.get(BASEURL).text, features='html5lib')
+            links = [l.get('href') for l in soup.find_all('a')]
+            tgz = filter(lambda s: 'pnml' in s, links)
+
+            for f in filter(lambda f: not os.path.isfile('mcc/'+f), tgz):
+                wget.download(BASEURL+f, 'mcc/'+f)
+        elif sys.argv[1] == 'pnml':
+            # first prepare the pnml models
+            for name in ext_files("mcc", ".tar.gz"):
+                tar = tarfile.open('mcc/'+name+'.tar.gz', "r:gz")
+                for n in filter(lambda n: 'pnml' in n and 'PT' in n, tar.getnames()):
+                    # apply patterns to get correct filename
+                    pnmlfile = apply_patterns(n)
+                    if not os.path.isfile('mcc/'+pnmlfile):
+                        print("Extracting {}...".format(pnmlfile))
+                        with open("mcc/"+pnmlfile, "wb") as out:
+                            f = tar.extractfile(n)
+                            out.write(f.read())
+        elif sys.argv[1] == 'list':
             for c in calls:
                 print(c['outp'])
         elif sys.argv[1] == 'todo':
