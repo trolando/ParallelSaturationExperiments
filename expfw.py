@@ -227,6 +227,9 @@ class ExperimentEngine(object):
         while len(self.results) <= iteration:
             self.results.append({})
 
+    def get_logfile(self, experiment, iteration):
+        return "{}/{}-{}".format(self.logdir, experiment.name, iteration)
+
     def get_status(self, experiment, iteration):
         """Get the status of the experiment.
         Returns from the cache unless the experiment timed out with a lower
@@ -361,6 +364,29 @@ class ExperimentEngine(object):
                 return
             for e in experiments:
                 self.print_status(e, i)
+
+    def clean(self, iterations=None):
+        """Erase all logfiles of errors and clear the cache.
+        """
+        # if group is set, limit to experiments in the group
+        experiments = list(self)
+        # report until empty iteration
+        for i in itertools.count():
+            if iterations is not None and i >= iterations:
+                break
+            if len(self.results) <= i or len(self.results[i]) == 0:
+                break
+            for e in experiments:
+                status, value = self.get_status(e, i)
+                if status == Experiment.ERROR:
+                    fname = self.get_logfile(e, i)
+                    if os.path.isfile(fname):
+                        print("removed: " + fname)
+                        os.unlink(fname)
+        if os.path.isfile(self.cachefile):
+            print("removed: " + self.cachefile)
+            os.unlink(self.cachefile)
+            self.results = []
 
     def run(self, group=None, iterations=None):
         """Run experiments (possibly forever).

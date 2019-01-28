@@ -77,8 +77,8 @@ class ExpBDDSatBS(ExpLTSmin):
     def __init__(self, exe, name, workers, model):
         self.group = name
         self.workers = workers
-        self.method = "otf-bdd-sat"
-        self.name = "{}-otf-bdd-sat-{}".format(name, workers)
+        self.method = "rbs-otf-bdd-sat"
+        self.name = "{}-rbs-otf-bdd-sat-{}".format(name, workers)
         self.call = [exe, "--when", "--precise", "-rbs", "--lace-workers={}".format(workers), "--vset=sylvan", "--saturation=sat", model]
 
 
@@ -86,8 +86,8 @@ class ExpLDDSatBS(ExpLTSmin):
     def __init__(self, exe, name, workers, model):
         self.group = name
         self.workers = workers
-        self.method = "otf-ldd-sat"
-        self.name = "{}-otf-ldd-sat-{}".format(name, workers)
+        self.method = "rbs-otf-ldd-sat"
+        self.name = "{}-rbs-otf-ldd-sat-{}".format(name, workers)
         self.call = [exe, "--when", "--precise", "-rbs", "--lace-workers={}".format(workers), "--vset=lddmc", "--saturation=sat", model]
 
 
@@ -117,6 +117,10 @@ class ExpLDD(Experiment):
         else:
             return "{} seconds".format(res['time'])
 
+    def run_experiment(self, *args, **kwargs):
+        if os.path.isfile(self.model):
+            super(ExpLDD, self).run_experiments(*args, **kwargs)
+
 
 class ExpLDDPar(Experiment):
     def __init__(self, name, workers, model):
@@ -143,6 +147,10 @@ class ExpLDDPar(Experiment):
             return "{} seconds, {} states".format(res['time'], res['states'])
         else:
             return "{} seconds".format(res['time'])
+
+    def run_experiment(self, *args, **kwargs):
+        if os.path.isfile(self.model):
+            super(ExpLDDPar, self).run_experiments(*args, **kwargs)
 
 
 class ExpLDDChaining(Experiment):
@@ -171,6 +179,10 @@ class ExpLDDChaining(Experiment):
         else:
             return "{} seconds".format(res['time'])
 
+    def run_experiment(self, *args, **kwargs):
+        if os.path.isfile(self.model):
+            super(ExpLDDChaining, self).run_experiments(*args, **kwargs)
+
 
 class ExpBDD(Experiment):
     def __init__(self, name, workers, model):
@@ -198,6 +210,9 @@ class ExpBDD(Experiment):
         else:
             return "{} seconds".format(res['time'])
 
+    def run_experiment(self, *args, **kwargs):
+        if os.path.isfile(self.model):
+            super(ExpBDD, self).run_experiments(*args, **kwargs)
 
 class ExpMDD(Experiment):
     def __init__(self, name, model):
@@ -227,6 +242,10 @@ class ExpMDD(Experiment):
         else:
             return "{} seconds".format(res['time'])
 
+    def run_experiment(self, *args, **kwargs):
+        if os.path.isfile(self.model):
+            super(ExpMDD, self).run_experiments(*args, **kwargs)
+
 
 class FileFinder(object):
     def __init__(self, directory, extensions):
@@ -246,7 +265,7 @@ class FileFinder(object):
 
 class LDDExperiments(object):
     def __init__(self, directory, workers):
-        self.files = FileFinder(directory, ["ldd"])
+        self.files = FileFinder(directory, ["pnml"])
         self.workers = workers
 
     def dicts(self):
@@ -262,11 +281,18 @@ class LDDExperiments(object):
             setattr(self, d, {})
         self.grouped = {}
         for name, filename in self.files:
+            # with -rf
             for w in self.workers:
-                getattr(self, "s_"+str(w))[name] = ExpLDD(name, w, filename)
-                getattr(self, "c_"+str(w))[name] = ExpLDDChaining(name, w, filename)
-                getattr(self, "p_"+str(w))[name] = ExpLDDPar(name, w, filename)
-            self.grouped[name] = [getattr(self, d)[name] for d in self.dicts()]
+                getattr(self, "s_"+str(w))[name+"-rf"] = ExpLDD(name+"-rf", w, filename[:-5]+"-rf")
+                getattr(self, "c_"+str(w))[name+"-rf"] = ExpLDDChaining(name+"-rf", w, filename[:-5]+"-rf")
+                getattr(self, "p_"+str(w))[name+"-rf"] = ExpLDDPar(name+"-rf", w, filename[:-5]+"-rf")
+            self.grouped[name+"-rf"] = [getattr(self, d)[name+"-rf"] for d in self.dicts()]
+            # with -rbs
+            for w in self.workers:
+                getattr(self, "s_"+str(w))[name+"-rbs"] = ExpLDD(name+"-rbs", w, filename[:-5]+"-rbs")
+                getattr(self, "c_"+str(w))[name+"-rbs"] = ExpLDDChaining(name+"-rbs", w, filename[:-5]+"-rbs")
+                getattr(self, "p_"+str(w))[name+"-rbs"] = ExpLDDPar(name+"-rbs", w, filename[:-5]+"-rbs")
+            self.grouped[name+"-rbs"] = [getattr(self, d)[name+"-rbs"] for d in self.dicts()]
 
     def __iter__(self):
         if not hasattr(self, 'grouped'):
@@ -276,7 +302,7 @@ class LDDExperiments(object):
 
 class BDDExperiments(object):
     def __init__(self, directory, workers):
-        self.files = FileFinder(directory, ["bdd"])
+        self.files = FileFinder(directory, ["pnml"])
         self.workers = workers
 
     def dicts(self):
@@ -290,9 +316,14 @@ class BDDExperiments(object):
             setattr(self, d, {})
         self.grouped = {}
         for name, filename in self.files:
+            # with -rf
             for w in self.workers:
-                getattr(self, "s_"+str(w))[name] = ExpBDD(name, w, filename)
-            self.grouped[name] = [getattr(self, d)[name] for d in self.dicts()]
+                getattr(self, "s_"+str(w))[name+"-rf"] = ExpBDD(name+"-rf", w, filename[:-5]+"-rf.bdd")
+            self.grouped[name+"-rf"] = [getattr(self, d)[name+"-rf"] for d in self.dicts()]
+            # with -rbs
+            for w in self.workers:
+                getattr(self, "s_"+str(w))[name+"-rbs"] = ExpBDD(name+"-rbs", w, filename[:-5]+"-rbs.bdd")
+            self.grouped[name+"-rbs"] = [getattr(self, d)[name+"-rbs"] for d in self.dicts()]
 
     def __iter__(self):
         if not hasattr(self, 'grouped'):
@@ -302,7 +333,7 @@ class BDDExperiments(object):
 
 class MDDExperiments(object):
     def __init__(self, directory):
-        self.files = FileFinder(directory, ["mdd"])
+        self.files = FileFinder(directory, ["pnml"])
 
     def dicts(self):
         return ["s"]
@@ -311,8 +342,11 @@ class MDDExperiments(object):
         self.s = {}
         self.grouped = {}
         for name, filename in self.files:
-            self.s[name] = ExpMDD(name, filename)
-            self.grouped[name] = [getattr(self, d)[name] for d in self.dicts()]
+            # one with -rf, one with -rbs
+            self.s[name+"-rf"] = ExpMDD(name+"-rf", filename[:-5]+"-rf.mdd")
+            self.grouped[name+"-rf"] = [getattr(self, d)[name+"-rf"] for d in self.dicts()]
+            self.s[name+"-rbs"] = ExpMDD(name+"-rbs", filename[:-5]+"-rbs.mdd")
+            self.grouped[name+"-rbs"] = [getattr(self, d)[name+"-rbs"] for d in self.dicts()]
 
     def __iter__(self):
         if not hasattr(self, 'grouped'):
@@ -328,8 +362,6 @@ class PNMLExperiments(object):
     def dicts(self):
         dicts = []
         for w in self.workers:
-            # dicts.append("bf_" + str(w))
-            # dicts.append("bs_" + str(w))
             dicts.append("lf_" + str(w))
             dicts.append("ls_" + str(w))
         return dicts
@@ -340,8 +372,6 @@ class PNMLExperiments(object):
         self.grouped = {}
         for name, filename in self.files:
             for w in self.workers:
-                # getattr(self, "bf_"+str(w))[name] = ExpBDDSatF(PNML2LTSSYM, name, w, filename)
-                # getattr(self, "bs_"+str(w))[name] = ExpBDDSatBS(PNML2LTSSYM, name, w, filename)
                 getattr(self, "lf_"+str(w))[name] = ExpLDDSatF(PNML2LTSSYM, name, w, filename)
                 getattr(self, "ls_"+str(w))[name] = ExpLDDSatBS(PNML2LTSSYM, name, w, filename)
             self.grouped[name] = [getattr(self, d)[name] for d in self.dicts()]

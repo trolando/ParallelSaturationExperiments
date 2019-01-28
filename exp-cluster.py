@@ -26,6 +26,7 @@ def usage():
     eprint("exp-cluster.py run <GROUP>    Run a group")
     eprint("exp-cluster.py cache          Update the cache")
     eprint("exp-cluster.py csv            Write the CSV of the results to stdout")
+    eprint("exp-cluster.py clean          Delete cache and delete error experiments")
 
 
 def main():
@@ -65,6 +66,9 @@ def main():
                         print("{}; {}; {}; {}; 0".format(e.group, e.method, e.workers, value['time']))
                     elif status == Experiment.TIMEOUT:
                         print("{}; {}; {}; {}; -1".format(e.group, e.method, e.workers, value))
+        elif sys.argv[1] == 'clean':
+            engine.initialize(ITERATIONS, False)
+            engine.clean(iterations=ITERATIONS)
         else:
             usage()
     else:
