@@ -1,6 +1,7 @@
 #include <argp.h>
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -299,21 +300,17 @@ strip_actions_meta(MDD meta)
  */
 static uint64_t ldd_rel_to_meddly_cache_id;
 int
-ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
+ldd_rel_to_meddly(const MDD dd, const MDD meta, expert_forest *F, const int level)
 {
-    if (dd == lddmc_false) {
-        return F->handleForValue(false);
-    }
-    if (dd == lddmc_true) {
-        // IGNORE for now because of 5 assert(level == 0);
-        return F->handleForValue(true);
-    }
+    if (dd == lddmc_false) return F->handleForValue(false);
+    if (dd == lddmc_true) return F->handleForValue(true);
 
     if (level == 0) {
         printf("We are unexpectedly at level 0. Remaining meta:");
-        while (meta != lddmc_true) {
-            printf(" %d", lddmc_getvalue(meta));
-            meta = lddmc_getdown(meta);
+        MDD _meta = meta;
+        while (_meta != lddmc_true) {
+            printf(" %d", lddmc_getvalue(_meta));
+            _meta = lddmc_getdown(_meta);
         }
         printf("\n");
         lddmc_print(dd);
@@ -322,6 +319,7 @@ ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
     }
 
     assert(level != 0);
+    assert(level > 0);
 
     assert(meta != lddmc_false && meta != lddmc_true);
 
@@ -332,137 +330,96 @@ ldd_rel_to_meddly(MDD dd, MDD meta, expert_forest *F, int level)
      *  2 is write
      *  3 is only-read
      *  4 is only-write
+     *  5 is "label" and should not occur!
      */
 
     uint64_t result;
     if (cache_get3(ldd_rel_to_meddly_cache_id, dd, meta, level, &result)) {
         assert (F->isActiveNode(result));
-        // return (int)result;
+        return (int)result;
     }
 
     const mddnode_t n = LDD_GETNODE(dd);
 
     const mddnode_t nmeta = LDD_GETNODE(meta);
     const uint32_t vmeta = mddnode_getvalue(nmeta);
+    const MDD next_meta = mddnode_getdown(nmeta);
 
     if (vmeta == (uint32_t)-1) {
 #ifndef NDEBUG
         printf("Oh noes.\nlevel is %d, remainder is %zu levels deep\n", level, lddmc_test_ismdd(dd));
 #endif
     }
-
-    assert(vmeta != (uint32_t)-1);
-    const MDD next_meta = mddnode_getdown(nmeta);
+    assert(vmeta <= 4);
 
     if (vmeta == 0) {
         /* skip level */
-        assert(level > 0);
-        result = ldd_rel_to_meddly(dd, mddnode_getdown(nmeta), F, level-1);
+        result = ldd_rel_to_meddly(dd, next_meta, F, level-1);
     } else if (vmeta == 1) {
-        /* read level */
+        /* read level, a write level will follow */
         assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
+        assert(mddnode_getvalue(LDD_GETNODE(next_meta)) == 2); // write must follow
 
         // Determine length of LDD list
         int len = 0;
-        MDD x = dd;
-        while (x != lddmc_false) {
-            len++;
-            // assert(lddmc_getcopy(x) == 0); // also check for unsupported copy nodes
-            x = lddmc_getright(x);
-        }
+        for (MDD x = dd; x != lddmc_false; x = lddmc_getright(x)) len++;
 
         unpacked_node* nb = unpacked_node::newSparse(F, level, len);
-        x = dd;
+        MDD x = dd;
         for (int i=0; i<len; i++) {
-            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, -level);
-            // printf("REC %zu.%d => %d\n", inp, lddmc_getvalue(x), m_d);
             nb->i_ref(i) = lddmc_getvalue(x);
-            nb->d_ref(i) = /*F->linkNode(m_d); */ level > 1 ? F->linkNode(m_d) : m_d;
+            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, level);
+            nb->d_ref(i) = F->linkNode(m_d);
             x = lddmc_getright(x);
         }
 
         result = F->createReducedNode(-1, nb);
     } else if (vmeta == 3) {
-        assert(0);
         /* only-read level */
         assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
 
         // Determine length of LDD list
         int len = 0;
-        MDD x = dd;
-        while (x != lddmc_false) {
-            len++;
-            x = lddmc_getright(x);
-        }
+        for (MDD x = dd; x != lddmc_false; x = lddmc_getright(x)) len++;
 
         unpacked_node* nb = unpacked_node::newSparse(F, level, len);
-        x = dd;
+        MDD x = dd;
         for (int i=0; i<len; i++) {
-            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, level-1);
             // Now create a reduced WRITE node on top of the recursive result
             unpacked_node *nx = unpacked_node::newSparse(F, -level, 1);
-            nx->i_ref(i) = lddmc_getvalue(x);
-            nb->d_ref(i) = level > 1 ? F->linkNode(m_d) : m_d;
+            nx->i_ref(0) = lddmc_getvalue(x);
+            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, level-1);
+            nx->d_ref(0) = F->linkNode(m_d);
             nb->i_ref(i) = lddmc_getvalue(x);
             nb->d_ref(i) = F->linkNode(F->createReducedNode(-1, nx));
             x = lddmc_getright(x);
         }
 
         result = F->createReducedNode(-1, nb);
-    } else if (vmeta == 4) {
+    } else if (vmeta == 2 or vmeta == 4) {
         /* write or only-write level */
         assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
 
         // Determine length of LDD list
         int len = 0;
-        MDD x = dd;
-        while (x != lddmc_false) {
-            len++;
-            x = lddmc_getright(x);
-        }
+        for (MDD x = dd; x != lddmc_false; x = lddmc_getright(x)) len++;
 
         unpacked_node* nb = unpacked_node::newSparse(F, -level, len);
-        x = dd;
+        MDD x = dd;
         for (int i=0; i<len; i++) {
+            nb->i_ref(i) = lddmc_getvalue(x);
             int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, level-1);
             // printf("REC %zu.%d => %d\n", inp, lddmc_getvalue(x), m_d);
-            nb->i_ref(i) = lddmc_getvalue(x);
-            nb->d_ref(i) = /*F->linkNode(m_d); */ level > 1 ? F->linkNode(m_d) : m_d;
+            nb->d_ref(i) = F->linkNode(m_d);
             x = lddmc_getright(x);
         }
 
         result = F->createReducedNode(-1, nb);
-    } else if (vmeta == 2) {
-        /* write or only-write level */
-        assert(!mddnode_getcopy(n));  // do not process read copy nodes for now
-
-        // Determine length of LDD list
-        int len = 0;
-        MDD x = dd;
-        while (x != lddmc_false) {
-            len++;
-            // assert(lddmc_getcopy(x) == 0); // also check for unsupported copy nodes
-            x = lddmc_getright(x);
-        }
-
-        unpacked_node* nb = unpacked_node::newSparse(F, level, len);
-        x = dd;
-        for (int i=0; i<len; i++) {
-            int m_d = ldd_rel_to_meddly(lddmc_getdown(x), next_meta, F, -level-1);
-            // printf("REC %zu.%d => %d\n", inp, lddmc_getvalue(x), m_d);
-            nb->i_ref(i) = lddmc_getvalue(x);
-            nb->d_ref(i) = /*F->linkNode(m_d); */ level > 1 ? F->linkNode(m_d) : m_d;
-            x = lddmc_getright(x);
-        }
-
-        result = F->createReducedNode(-1, nb);
-    } else if (vmeta == 5) {
-        /* skip meta */
-        result = ldd_rel_to_meddly(dd, mddnode_getdown(nmeta), F, level);
     } else {
-        assert(vmeta <= 5);
+        assert(0);
     }
 
+    F->linkNode(result); // never delete...
     cache_put3(ldd_rel_to_meddly_cache_id, dd, meta, level, result);
 
     return result;
@@ -472,22 +429,20 @@ static uint64_t ldd_to_meddly_cache_id;
 int
 ldd_to_meddly(MDD inp, expert_forest *F, int level)
 {
-    assert(inp != lddmc_false); // should NOT happen! (empty set actually)
-    if (inp == lddmc_true) {
-        assert(level == 0);
-        return F->handleForValue(true);
+    if (level == 0) {
+        assert(inp == lddmc_true);
+        return F->handleForValue(1);
     }
-    assert(level != 0);
+    assert(inp != lddmc_true);
+    assert(inp != lddmc_false); // should NOT happen!
 
     uint64_t result;
     /* get from cache */
     /* note: some assumptions about the encoding... */
     if (cache_get3(ldd_to_meddly_cache_id, inp, 0, 0, &result)) {
-        assert (F->isActiveNode(result));
+        assert(F->isActiveNode(result));
         return (int)result;
     }
-
-    // mddnode_t n = LDD_GETNODE(inp);
 
     // Determine length of LDD list
     int len = 0;
@@ -497,43 +452,24 @@ ldd_to_meddly(MDD inp, expert_forest *F, int level)
         x = lddmc_getright(x);
     }
 
+    // printf("%zu len %d\n", inp, len);
+
     unpacked_node* nb = unpacked_node::newSparse(F, level, len);
     x = inp;
     for (int i=0; i<len; i++) {
-        int m_d = ldd_to_meddly(lddmc_getdown(x), F, level-1);
-        // printf("REC %zu.%d => %d\n", inp, lddmc_getvalue(x), m_d);
         nb->i_ref(i) = lddmc_getvalue(x);
-        nb->d_ref(i) = /*F->linkNode(m_d); */ level > 1 ? F->linkNode(m_d) : m_d;
-        x = lddmc_getright(x);
-    }
-
-    /*
-    printf("creating reduced node: %zu %d,", inp, level);
-    x = inp;
-    for (int i=0; i<len; i++) {
-        printf(" %d->%d", nb->i(i), nb->d(i));
-        if (nb->i(i) != (int)lddmc_getvalue(x)) {
-            printf("\nCORRUPT: %d != %u\n", nb->i(i), lddmc_getvalue(x));
-            assert(0);
+        if (level == 1) {
+            nb->d_ref(i) = F->handleForValue(1);
+        } else {
+            nb->d_ref(i) = F->linkNode(ldd_to_meddly(lddmc_getdown(x), F, level-1));
         }
         x = lddmc_getright(x);
     }
-    printf("\n");
-    */
 
     node_handle res = F->createReducedNode(-1, nb);
 
-    /*
-    printf("created reduced node %d: %d,", res, level);
-    for (int i=0; i<len; i++) {
-        printf(" %d->%d", nb->i(i), nb->d(i));
-    }
-    printf("\n");
-    */
-
-    // unpacked_node::recycle(nb);
-
     /* put in cache */
+    F->linkNode(res); // never delete...
     cache_put3(ldd_to_meddly_cache_id, inp, 0, 0, res);
 
     return res;
@@ -658,13 +594,21 @@ void run()
         }
     }
 
+    printf("Removing action labels...\n");
+
+    // get rid of the actions
     for (int i=0; i<next_count; i++) {
-        /*
+        next[i]->dd = strip_actions(next[i]->dd, next[i]->meta);
+        next[i]->meta = strip_actions_meta(next[i]->meta);
+    }
+
+#if 0
+    for (int i=0; i<next_count; i++) {
         char buf[80];
         sprintf(buf, "next-%d.ldd.dot", i);
         FILE* f=fopen(buf, "w");
         lddmc_fprintdot(f, next[i]->dd);
-        fclose(f);*/
+        fclose(f);
         /*
         std::stringstream cmd;
         cmd << "dot -Tpng -o next-" << i << ".ldd.png " << buf;
@@ -674,26 +618,7 @@ void run()
         }
         */
     }
-
-    /*
-    if (verbose) {
-        for (int i=0; i<next_count; i++) {
-            print_matrix(vector_size, next[i]->meta);
-            printf(" (%zu)", lddmc_test_ismdd(next[i]->dd)-1);
-            printf("\n");
-        }
-    }
-    */
-
-    printf("Removing action labels...\n");
-
-    // get rid of the actions
-    for (int i=0; i<next_count; i++) {
-        // printf("Transition %d before has depth %zu\n", i, lddmc_test_ismdd(next[i]->dd));
-        next[i]->dd = strip_actions(next[i]->dd, next[i]->meta);
-        next[i]->meta = strip_actions_meta(next[i]->meta);
-        // printf("Transition %d after  has depth %zu\n", i, lddmc_test_ismdd(next[i]->dd));
-    }
+#endif
 
     // Report that we prepare BDD conversion
     printf("Converting to Meddly MDD...\n");
@@ -713,28 +638,16 @@ void run()
         printf("\n");
     }
 
-    /*
-    if (verbose) {
-        for (int i=0; i<next_count; i++) {
-            printf("Transition %d: %zu LDD nodes, %.0Lf transitions\n", i, lddmc_nodecount(next[i]->dd), lddmc_satcount(next[i]->dd));
-        }
-        for (int i=0; i<next_count; i++) {
-            print_matrix(vector_size, next[i]->meta);
-            printf(" (%zu)", lddmc_test_ismdd(next[i]->dd));
-            printf("\n");
-        }
-    }
-    */
 
-    // NOTE THAT MEDDLY HAS NO ACTION LABEL OR DOES IT?
     // initializer_list* L = defaultInitializerList(0);
     // ct_initializer::setMaxSize(16 * 16777216);
     // MEDDLY::initialize(L);
+
     MEDDLY::initialize();
 
     // Initialize domain
     int* sizes = new int[vector_size];
-    for (int i=0; i<vector_size; i++) sizes[vector_size-i-1] = highest[i]+1; // TODO actually look at chain lengths
+    for (int i=0; i<vector_size; i++) sizes[vector_size-i-1] = highest[i]+1; // TODO actually look at chain lengths?
     domain* d = createDomainBottomUp(sizes, vector_size);
 
     // Initialize forests
@@ -747,29 +660,12 @@ void run()
     dd_edge m_states(mdd);
     m_states.set(ldd_to_meddly(states->dd, mdd, vector_size));
 
-    /*
-    if (verbose) {
-        double c;
-        apply(CARDINALITY, m_initial, c);
-        printf("Approx. %g initial states\n", c);
-
-        apply(CARDINALITY, m_states, c);
-        printf("Approx. %g reachable states\n", c);
-    }
-    */
-
-    // mdd->dump(meddlyout, 3);
-    // mdd->reportStats(meddlyout, "1:\t", expert_forest::BASIC_STATS);
-    // mdd->dump(meddlyout, 3);
-    // mdd->reportStats(meddlyout, "2:\t", expert_forest::BASIC_STATS);
-
     dd_edge m_next[next_count];
     dd_edge m_tmp(mxd);
     for (int i=0; i<next_count; i++) {
-        // printf("Doing transition %d\n", i);
+        if (verbose) printf("Doing transition %d\n", i);
         m_next[i] = m_tmp;
         m_next[i].set(ldd_rel_to_meddly(next[i]->dd, next[i]->meta, mxd, vector_size));
-        // printf("Result has %u nodes and cardinality %.0lf\n", m_next[i].getNodeCount(), m_next[i].getCardinality());
     }
 
     // Report statistics
@@ -782,8 +678,14 @@ void run()
         }
     }
 
+    printf("Conversion finished.\n");
+
     if (out_filename != NULL) {
         FILE* out = fopen(out_filename, "w");
+        if (out == NULL) {
+            printf("Cannot open file for writing!\n");
+            exit(0);
+        }
         FILE_output m_out(out);
 
         dd_edge list[2];
@@ -794,7 +696,21 @@ void run()
         for (int i=0; i<vector_size; i++) fprintf(out, "%d ", sizes[i]);
         fprintf(out, "\nledom\n");
 
-        mxd->writeEdges(m_out, m_next, next_count);
+        // Due to a bug in Meddley, we can't use next_count if next_count > 1024
+        {
+            int64_t rem = next_count;
+            while (rem) {
+                int64_t offset = next_count-rem;
+                if (rem > 1000) {
+                    mxd->writeEdges(m_out, m_next+offset, 1000);
+                    rem -= 1000;
+                } else {
+                    mxd->writeEdges(m_out, m_next+offset, rem);
+                    rem = 0;
+                }
+            }
+        }
+
         mdd->writeEdges(m_out, list, 2);
 
         fclose(out);
@@ -804,78 +720,10 @@ void run()
         exit(0);
     }
 
-    // m_initial.show(meddlyout, 2);
-
-    // TEST ONE for the transition relations
-    // Check whether they have the correct levels
-    bool has_v[vector_size+1];
-    for (int i=0; verbose and i<next_count; i++) {
-        for (int j=0; j<vector_size+1; j++) has_v[j] = false;
-
-        // m_next[i].show(meddlyout, 0);
-
-        int root = m_next[i].getNode();
-        int lvl = m_next[i].getLevel();
-        has_v[lvl < 0 ? -lvl : lvl] = true;
-
-        int *nodes = mxd->markNodesInSubgraph(&root, 1, false);
-        int *ptr = nodes;
-        while (*ptr != 0) {
-            lvl = mxd->getNodeLevel(*ptr);
-            lvl = lvl<0 ? -lvl : lvl;
-            if (!has_v[lvl]) {
-                // printf("%d\n", mxd->getNodeLevel(*ptr));
-                has_v[lvl] = true;
-            }
-            ptr++;
-        }
-
-        /*
-        print_matrix(vector_size, next[i]->meta);
-        int level_count = 0;
-        for (int j=0; j<vector_size+1; j++) {
-            if (has_v[j]) {
-                printf(" %d", j);
-                level_count++;
-            }
-        }
-        */
-
-#ifndef NDEBUG
-        long ldd_levels = lddmc_test_ismdd(next[i]->dd)-1;
-        if (ldd_levels != level_count*2) {
-            printf(" ERROR! LDD has %zu levels!", ldd_levels);
-        }
-#endif
-
-        // double card = m_next[i].getCardinality();
-        // card /= (1L<<(2*(vector_size-level_count)));
-        // printf(", %u %.0lf\n", m_next[i].getNodeCount(), card);
-        // printf("\n");
-    }
-
     // Report Sylvan statistics (if SYLVAN_STATS is set)
     if (verbose) sylvan_stats_report(stdout);
     sylvan_quit();
     lace_exit();
-
-    // mxd->reportStats(meddlyout, "3:\t", expert_forest::BASIC_STATS);
-
-    // lddmc_print(next[0]->dd);
-    // mxd->writeEdges(meddlyout, &m_nsf, 1);
-
-    // lddmc_printdot(next[0]->dd);
-    // m_nsf.writePicture("test", "png");
-
-    // operation::showAllComputeTables(meddlyout, 3);
-
-/*
-    mdd->reportStats(meddlyout, "\t",
-            expert_forest::HUMAN_READABLE_MEMORY |
-            expert_forest::BASIC_STATS | expert_forest::EXTRA_STATS |
-            expert_forest::STORAGE_STATS | expert_forest::HOLE_MANAGER_STATS |
-            expert_forest::HOLE_MANAGER_DETAILED);
-*/
 
     printf("Testing correctness by running event-saturation on the result...\n");
 
@@ -896,6 +744,8 @@ void run()
     printf("Approx. %.0f initial states\n", c);
     apply(CARDINALITY, m_reachable, c);
     printf("Approx. %.0f reachable states\n", c);
+    apply(CARDINALITY, m_states, c);
+    printf("Approx. %.0f expected reachable states\n", c);
 
     printf("MEDDLY Time: %f\n", t2-t1);
 

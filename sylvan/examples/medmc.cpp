@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <sys/time.h>
 
-// #include <gmp.h>
+#if 0
+#include <gmp.h>
+#endif
 
 #include <meddly.h>
 #include <meddly_expert.h>
@@ -96,7 +98,21 @@ void run()
     dd_edge m_next[next_count];
     dd_edge m_sets[2];
 
-    mxd->readEdges(s, m_next, next_count);
+    // Due to a bug in Meddly, we read in blocks of 1000
+    {
+        int64_t rem = next_count;
+        while (rem) {
+            int64_t offset = next_count-rem;
+            if (rem > 1000) {
+                mxd->readEdges(s, m_next+offset, 1000);
+                rem -= 1000;
+            } else {
+                mxd->readEdges(s, m_next+offset, rem);
+                rem = 0;
+            }
+        }
+    }
+
     mdd->readEdges(s, m_sets, 2);
 
     fclose(f);
@@ -129,13 +145,17 @@ void run()
     apply(CARDINALITY, m_reachable, c);
     printf("States: %.0f\n", c);
 
-    /*
+#if 0
+    // Nice idea, but there is a bug in Meddly.
+
     mpz_t mpz;
     mpz_init(mpz);
     mpz_clear(mpz);
     apply(CARDINALITY, m_reachable, mpz);
-    gmp_printf("Precise states: %Zd\n", mpz);
-    */
+    printf("Precise states: ");
+    mpz_out_str(0, 10, mpz);
+    printf("\n");
+#endif
 
     // Debug check
     if (m_reachable != m_sets[1]) {
